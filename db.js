@@ -1,34 +1,58 @@
-// // db.js
-// const { Pool } = require('pg');
-
-// const pool = new Pool({
-//   user: 'postgres',       // the username you created in pgAdmin
-//   host: 'localhost',          // or your remote host if not local
-//   database: 'myapp',   // the database you created in pgAdmin
-//   password: 'Abhay@123', // the password for your user
-//   port: 5432,                 // default PostgreSQL port
-// });
-
-// module.exports = pool;
-// db.js
 const { Pool } = require('pg');
-require('dotenv').config(); // This will load the variables from .env
+require('dotenv').config(); // Load .env variables
 
-// const pool = new Pool({
-//   user: process.env.DB_USER,
-//   host: process.env.DB_HOST,
-//   database: process.env.DB_NAME,
-//   password: process.env.DB_PASSWORD,
-//   port: process.env.PORT || 5432,
-// });
 const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_NAME,
-  password: process.env.DB_PASSWORD,
-  port: process.env.DB_PORT || 5432,
+  user: 'postgres',
+  host: 'localhost',
+  database: 'myapp',
+  password: 'anush',
+  port: 5432,
 });
 
+// Create services table
+const createServicesTable = `
+  CREATE TABLE IF NOT EXISTS public.services (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`;
+
+// Create service_nodes table
+const createServiceNodesTable = `
+  CREATE TABLE IF NOT EXISTS public.service_nodes (
+    id SERIAL PRIMARY KEY,
+    service_id INTEGER REFERENCES public.services(id) ON DELETE CASCADE,
+    parent_id INTEGER REFERENCES public.service_nodes(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    attributes JSONB NOT NULL,
+    customizations TEXT,
+    connection_type VARCHAR(50) NOT NULL CHECK (connection_type IN ('sequential', 'conditional', 'parallel', 'optional')),
+    condition VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`;
+
+// Create users table
+const createUsersTable = `
+  CREATE TABLE IF NOT EXISTS public.users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    role VARCHAR(50) NOT NULL CHECK (role IN ('admin', 'user', 'service_provider')),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+`;
+
+Promise.all([
+  pool.query(createServicesTable),
+  pool.query(createServiceNodesTable),
+  pool.query(createUsersTable),
+])
+  .then(() => console.log('Tables are ready'))
+  .catch(err => console.error('Table creation error:', err));
 
 module.exports = pool;
-

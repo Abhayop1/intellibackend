@@ -10,9 +10,10 @@ const signup = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const { rows } = await pool.query(
-      `INSERT INTO users (name, email, password_hash, role) 
-       VALUES ($1, $2, $3, $4) 
-       RETURNING id, name, email, role, created_at`,
+      `
+      INSERT INTO public.users (name, email, password_hash, role)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, name, email, role, created_at`,
       [name, email, hashedPassword, role]
     );
 
@@ -27,10 +28,11 @@ const signup = async (req, res) => {
 
 const login = async (req, res) => {
   try {
+    console.log("Login Request Body:", req.body);  // <-- add this
     const { email, password, role } = req.body;
 
     const { rows } = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
+      'SELECT * FROM public.users WHERE email = $1',
       [email]
     );
 
@@ -65,6 +67,7 @@ const login = async (req, res) => {
       },
     });
   } catch (error) {
+      console.error("Login Error:", error);  // <-- add this
     res.status(500).json({ error: error.message });
   }
 };
