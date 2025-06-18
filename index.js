@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const pool = require('./db'); // adjust path as needed
-const authRoutes = require('./authRoutes'); // ⬅️ your new routes file
+const pool = require('./db');
+const authRoutes = require('./authRoutes');
+const serviceRoutes = require('./service_api'); // New routes file
 
 const app = express();
 app.use(express.json());
@@ -16,13 +17,14 @@ app.get('/', (req, res) => {
   res.send('Welcome to the API!');
 });
 
-// Use auth routes
+// Use routes
 app.use('/api/auth', authRoutes);
+app.use('/api/services', serviceRoutes);
 
 // Example route (optional)
 app.get('/users', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM users');
+    const result = await pool.query('SELECT * FROM public.users');
     res.json(result.rows);
   } catch (err) {
     console.error(err);
