@@ -1,16 +1,40 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const pool = require('./db');
 const authRoutes = require('./authRoutes');
-const serviceRoutes = require('./service_api'); // New routes file
+const serviceRoutes = require('./service_api');
+const userRoutes = require('./user_api');
+const providerRoutes = require('./provider_api');
+const adminRoutes = require('./admin_api');
 
 const app = express();
+
+// Middleware
 app.use(express.json());
 
+// CORS Configuration
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Rate Limiting
+const loginLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 5,
+  message: { success: false, error: 'Too many login attempts, try again later', code: 'RATE_LIMIT_EXCEEDED' },
+});
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100,
+  message: { success: false, error: 'Too many requests, try again later', code: 'RATE_LIMIT_EXCEEDED' },
+});
+
+app.use('/api/auth/login', loginLimiter);
+app.use('/api', apiLimiter);
 
 // Root test route
 app.get('/', (req, res) => {
@@ -19,19 +43,40 @@ app.get('/', (req, res) => {
 
 // Use routes
 app.use('/api/auth', authRoutes);
-app.use('/api/services', serviceRoutes);
+app.use('/api/services', serviceRoutes); // For service management and document upload
+app.use('/api/provider', providerRoutes); // For provider-specific endpoints
+app.use('/api/user', userRoutes);
+app.use('/api/admin', adminRoutes);
 
-// Example route (optional)
-app.get('/users', async (req, res) => {
-  try {
-    const result = await pool.query('SELECT * FROM public.users');
-    res.json(result.rows);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Database error');
+// Global Error Handler
+app.use((error, req, res, next) => {
+  console.error('Global Error:', error);
+
+  if (error.name === 'ValidationError') {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      details: error.details,
+    });
   }
+
+  if (error.name === 'UnauthorizedError') {
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication failed',
+      code: 'AUTHENTICATION_ERROR',
+    });
+  }
+
+  res.status(500).json({
+    success: false,
+    error: 'Internal server error',
+    code: 'INTERNAL_ERROR',
+  });
 });
 
-app.listen(3000, () => {
-  console.log('App running on port 3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`App running on port ${PORT}`);
 });
