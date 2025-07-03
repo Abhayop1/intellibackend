@@ -151,7 +151,9 @@ router.get('/stats', verifyToken, restrictTo('admin'), async (req, res) => {
       },
       {
         label: 'Total Revenue',
-        value: statsRows[0].total_revenue ? statsRows[0].total_revenue.toFixed(2) : '0.00',
+        value: (statsRows[0].total_revenue !== null && statsRows[0].total_revenue !== undefined)
+          ? Number(statsRows[0].total_revenue).toFixed(2)
+          : '0.00',
         change: '+0', // Placeholder
         trend: 'stable',
       },
