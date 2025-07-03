@@ -1,19 +1,28 @@
 const { Pool } = require('pg');
-const { v4: uuidv4 } = require('uuid');
 require('dotenv').config(); // Load .env variables
 
 const pool = new Pool({
   user: process.env.DATABASE_USER || 'postgres',
   host: process.env.DATABASE_HOST || 'localhost',
-  database: process.env.DATABASE_NAME || 'serviceflow',
-  password: process.env.DATABASE_PASSWORD || 'anush',
+  database: process.env.DATABASE_NAME || 'myapp',
+  password: process.env.DATABASE_PASSWORD || 'Abhay@123',
   port: process.env.DATABASE_PORT || 5432,
 });
+
+// Enable pgcrypto for UUID generation
+const enablePgcrypto = `
+  CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+`;
 
 // Create ENUM types
 const createEnums = `
   DO $$ BEGIN
     CREATE TYPE user_role AS ENUM ('user', 'service_provider', 'admin');
+  EXCEPTION
+    WHEN duplicate_object THEN NULL;
+  END $$;
+  DO $$ BEGIN
+    CREATE TYPE user_status AS ENUM ('active', 'inactive', 'suspended');
   EXCEPTION
     WHEN duplicate_object THEN NULL;
   END $$;
@@ -42,111 +51,119 @@ const createEnums = `
 // Create users table
 const createUsersTable = `
   CREATE TABLE IF NOT EXISTS public.users (
-    id VARCHAR(255) PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'),
     password_hash VARCHAR(255) NOT NULL,
-    role user_role DEFAULT 'user',
+    role user_role DEFAULT 'user' NOT NULL,
+    status user_status DEFAULT 'active' NOT NULL,
     phone VARCHAR(20),
     address TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    company_name VARCHAR(255),
+    website VARCHAR(255),
+    business_license VARCHAR(255),
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create service_providers table
 const createServiceProvidersTable = `
   CREATE TABLE IF NOT EXISTS public.service_providers (
-    id VARCHAR(255) PRIMARY KEY,
-    user_id VARCHAR(255) REFERENCES public.users(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     company_name VARCHAR(255) NOT NULL,
     website VARCHAR(255),
     business_license VARCHAR(255),
     service_types JSON,
     description TEXT,
     logo_url VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create service_types table
 const createServiceTypesTable = `
   CREATE TABLE IF NOT EXISTS public.service_types (
-    id VARCHAR(255) PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
     description TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create services table
 const createServicesTable = `
   CREATE TABLE IF NOT EXISTS public.services (
-    id VARCHAR(255) PRIMARY KEY,
-    provider_id VARCHAR(255) REFERENCES public.service_providers(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    provider_id UUID NOT NULL REFERENCES public.service_providers(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    service_type VARCHAR(100),
+    service_type UUID REFERENCES public.service_types(id) ON DELETE SET NULL,
     configuration JSON,
-    status service_status DEFAULT 'active',
-    users_count INT DEFAULT 0,
-    revenue DECIMAL(10,2) DEFAULT 0.00,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    status service_status DEFAULT 'active' NOT NULL,
+    users_count INT DEFAULT 0 NOT NULL,
+    revenue DECIMAL(10,2) DEFAULT 0.00 NOT NULL,
+    tree JSONB,
+    documents JSONB,
+    svg TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create user_configurations table
 const createUserConfigurationsTable = `
   CREATE TABLE IF NOT EXISTS public.user_configurations (
-    id VARCHAR(255) PRIMARY KEY,
-    user_id VARCHAR(255) REFERENCES public.users(id) ON DELETE CASCADE,
-    service_id VARCHAR(255) REFERENCES public.services(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     configuration JSON,
-    progress INT DEFAULT 0,
-    status config_status DEFAULT 'draft',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    progress INT DEFAULT 0 NOT NULL,
+    status config_status DEFAULT 'draft' NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create documents table
 const createDocumentsTable = `
   CREATE TABLE IF NOT EXISTS public.documents (
-    id VARCHAR(255) PRIMARY KEY,
-    service_id VARCHAR(255) REFERENCES public.services(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    service_id UUID NOT NULL REFERENCES public.services(id) ON DELETE CASCADE,
     filename VARCHAR(255) NOT NULL,
     file_path VARCHAR(500) NOT NULL,
     file_type VARCHAR(100),
     file_size INT,
     upload_type upload_type,
     description TEXT,
-    uploaded_by VARCHAR(255) REFERENCES public.users(id) ON DELETE SET NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    uploaded_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create security_events table
 const createSecurityEventsTable = `
   CREATE TABLE IF NOT EXISTS public.security_events (
-    id VARCHAR(255) PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     type VARCHAR(100) NOT NULL,
     message TEXT NOT NULL,
     severity event_severity NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
 // Create password_reset_tokens table
 const createPasswordResetTokensTable = `
   CREATE TABLE IF NOT EXISTS public.password_reset_tokens (
-    id VARCHAR(255) PRIMARY KEY,
-    user_id VARCHAR(255) REFERENCES public.users(id) ON DELETE CASCADE,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     token VARCHAR(255) NOT NULL,
     expires_at TIMESTAMP NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
   );
 `;
 
@@ -181,23 +198,36 @@ const createTrigger = `
   EXECUTE FUNCTION update_updated_at_column();
 `;
 
-// Execute table creation
-Promise.all([
-  pool.query(createEnums),
-  pool.query(createUsersTable),
-  pool.query(createServiceProvidersTable),
-  pool.query(createServiceTypesTable),
-  pool.query(createServicesTable),
-  pool.query(createUserConfigurationsTable),
-  pool.query(createDocumentsTable),
-  pool.query(createSecurityEventsTable),
-  pool.query(createPasswordResetTokensTable),
-  pool.query(createTrigger),
-])
-  .then(() => console.log('Database schema initialized successfully'))
-  .catch(err => console.error('Table creation error:', err));
+// Sequential table creation and initialization
+async function initializeDatabase() {
+  try {
+    await pool.query(enablePgcrypto);
+    await pool.query(createEnums);
+    await pool.query(createUsersTable);
+    await pool.query(createServiceProvidersTable);
+    await pool.query(createServiceTypesTable);
+    await pool.query(createServicesTable);
+    await pool.query(createUserConfigurationsTable);
+    await pool.query(createDocumentsTable);
+    await pool.query(createSecurityEventsTable);
+    await pool.query(createPasswordResetTokensTable);
+    await pool.query(createTrigger);
+
+    // Now insert default service types
+    if (typeof insertDefaultServiceTypes === 'function') {
+      await insertDefaultServiceTypes();
+    }
+
+    console.log('Database schema initialized successfully');
+  } catch (err) {
+    console.error('Table creation error:', err);
+  }
+}
+
+initializeDatabase();
 
 // Insert default service types (optional, for initialization)
+const { v4: uuidv4 } = require('uuid');
 const insertDefaultServiceTypes = async () => {
   try {
     const serviceTypes = [
@@ -221,7 +251,5 @@ const insertDefaultServiceTypes = async () => {
     console.error('Error inserting default service types:', err);
   }
 };
-
-insertDefaultServiceTypes();
 
 module.exports = pool;

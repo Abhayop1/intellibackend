@@ -39,7 +39,7 @@ const transporter = nodemailer.createTransport({
 
 const signup = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role, companyName } = req.body;
 
     // Validate password strength
     if (!validatePassword(password)) {
@@ -53,21 +53,25 @@ const signup = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS) || 12);
 
-    const id = uuidv4();
-    const { rows } = await pool.query(
-      `
-      INSERT INTO public.users (id, name, email, password_hash, role)
-      VALUES ($1, $2, $3, $4, $5)
-      RETURNING id, name, email, role, created_at
-      `,
-      [id, name, email, hashedPassword, role]
+    const userInsert = await pool.query(
+      `INSERT INTO public.users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [name, email, hashedPassword, role]
     );
+    const user = userInsert.rows[0];
+
+    // If the user is a service provider, create a row in service_providers
+    if (role === 'service_provider') {
+      await pool.query(
+        `INSERT INTO public.service_providers (user_id, company_name) VALUES ($1, $2)`,
+        [user.id, companyName || '']
+      );
+    }
 
     await logSecurityEvent('signup_success', `User signed up: ${email}`, 'low');
 
     res.status(201).json({
       success: true,
-      user: rows[0],
+      user: user,
     });
   } catch (error) {
     if (error.code === '23505') {
@@ -127,7 +131,7 @@ const login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { user_id: user.id, email: user.email, role: user.role },
+      { id: user.id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
     );
@@ -170,11 +174,11 @@ const validateToken = async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const { rows } = await pool.query(
       'SELECT id, name, email, role FROM public.users WHERE id = $1',
-      [decoded.user_id]
+      [decoded.id]
     );
 
     if (!rows.length) {
-      await logSecurityEvent('token_validation_failed', `User not found for id: ${decoded.user_id}`, 'medium');
+      await logSecurityEvent('token_validation_failed', `User not found for id: ${decoded.id}`, 'medium');
       return res.status(401).json({
         success: false,
         error: 'User not found',

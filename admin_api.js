@@ -41,6 +41,47 @@ router.get('/users', verifyToken, restrictTo('admin'), async (req, res) => {
   }
 });
 
+// Delete a user by ID (admin only)
+router.delete('/users/:id', verifyToken, restrictTo('admin'), async (req, res) => {
+  const userId = req.params.id;
+  try {
+    // Optionally, you can check if the user exists first
+    await pool.query('DELETE FROM public.users WHERE id = $1', [userId]);
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting user:', err);
+    res.status(500).json({ success: false, error: 'Failed to delete user' });
+  }
+});
+
+// Update a user by ID (admin only)
+router.put('/users/:id', verifyToken, restrictTo('admin'), async (req, res) => {
+  const userId = req.params.id;
+  const { name, email, role, status } = req.body;
+  const updates = [];
+  const values = [];
+  let paramCount = 1;
+  if (name) { updates.push(`name = $${paramCount++}`); values.push(name); }
+  if (email) { updates.push(`email = $${paramCount++}`); values.push(email); }
+  if (role) { updates.push(`role = $${paramCount++}`); values.push(role); }
+  if (status) { updates.push(`status = $${paramCount++}`); values.push(status); }
+  if (updates.length === 0) {
+    return res.status(400).json({ success: false, error: 'No fields to update' });
+  }
+  values.push(userId);
+  const query = `UPDATE public.users SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`;
+  try {
+    const { rows } = await pool.query(query, values);
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    res.json({ success: true, user: rows[0] });
+  } catch (err) {
+    console.error('Error updating user:', err);
+    res.status(500).json({ success: false, error: 'Failed to update user' });
+  }
+});
+
 // Get all services for admin oversight
 router.get('/services', verifyToken, restrictTo('admin'), async (req, res) => {
   try {
@@ -63,7 +104,7 @@ router.get('/services', verifyToken, restrictTo('admin'), async (req, res) => {
         provider: row.company_name,
         status: row.status,
         users: row.users_count,
-        revenue: row.revenue ? row.revenue.toFixed(2) : '0.00',
+        revenue: typeof row.revenue === 'number' ? row.revenue.toFixed(2) : (parseFloat(row.revenue) ? Number(row.revenue).toFixed(2) : '0.00'),
       })),
     });
   } catch (err) {

@@ -151,48 +151,58 @@ router.get('/service-status', verifyToken, async (req, res) => {
   }
 });
 
-// Update user profile
-router.post('/update-profile', verifyToken, async (req, res) => {
-  const { name, phone, address } = req.body;
+// Debug: Add a GET route to confirm registration
+router.get('/update-profile', (req, res) => {
+  res.json({ success: true, message: 'GET /api/user/update-profile is registered.' });
+});
 
-  // Validate request body
-  if (!name && !phone && !address) {
+// Update user profile (all fields except image)
+router.post('/update-profile', verifyToken, async (req, res) => {
+  console.log('POST /api/user/update-profile called');
+  const {
+    name,
+    email,
+    phone,
+    address,
+    companyName,
+    website,
+    businessLicense,
+    description
+  } = req.body;
+
+  // Build update query dynamically
+  const updates = [];
+  const values = [];
+  let paramCount = 1;
+
+  if (name) { updates.push(`name = $${paramCount++}`); values.push(name); }
+  if (email) { updates.push(`email = $${paramCount++}`); values.push(email); }
+  if (phone) { updates.push(`phone = $${paramCount++}`); values.push(phone); }
+  if (address) { updates.push(`address = $${paramCount++}`); values.push(address); }
+  if (companyName) { updates.push(`company_name = $${paramCount++}`); values.push(companyName); }
+  if (website) { updates.push(`website = $${paramCount++}`); values.push(website); }
+  if (businessLicense) { updates.push(`business_license = $${paramCount++}`); values.push(businessLicense); }
+  if (description) { updates.push(`description = $${paramCount++}`); values.push(description); }
+
+  if (updates.length === 0) {
     return res.status(400).json({
       success: false,
-      error: 'At least one field (name, phone, address) is required',
+      error: 'At least one field is required',
       code: 'VALIDATION_ERROR',
     });
   }
 
+  values.push(req.user.user_id);
+
+  const query = `
+    UPDATE public.users
+    SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $${paramCount}
+    RETURNING name, email, phone, address, company_name, website, business_license, description
+  `;
+
   try {
-    const updates = [];
-    const values = [];
-    let paramCount = 1;
-
-    if (name) {
-      updates.push(`name = $${paramCount++}`);
-      values.push(name);
-    }
-    if (phone) {
-      updates.push(`phone = $${paramCount++}`);
-      values.push(phone);
-    }
-    if (address) {
-      updates.push(`address = $${paramCount++}`);
-      values.push(address);
-    }
-
-    values.push(req.user.user_id);
-
-    const query = `
-      UPDATE public.users
-      SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
-      WHERE id = $${paramCount}
-      RETURNING name, phone, address
-    `;
-
     const { rows } = await pool.query(query, values);
-
     if (!rows.length) {
       return res.status(404).json({
         success: false,
@@ -200,10 +210,95 @@ router.post('/update-profile', verifyToken, async (req, res) => {
         code: 'NOT_FOUND',
       });
     }
-
     res.json({
       success: true,
       message: 'Profile updated successfully',
+      user: rows[0],
+    });
+  } catch (err) {
+    console.error('Error updating profile:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update profile',
+      code: 'INTERNAL_ERROR',
+    });
+  }
+});
+
+// GET /profile - fetch current user's profile
+router.get('/profile', verifyToken, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, name, email, phone, address, company_name, website, business_license, description FROM public.users WHERE id = $1`,
+      [req.user.id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: 'User not found', code: 'NOT_FOUND' });
+    }
+    res.json({ success: true, user: rows[0] });
+  } catch (err) {
+    console.error('Error fetching user profile:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch profile', code: 'INTERNAL_ERROR' });
+  }
+});
+
+// POST /profile - update current user's profile (no profile picture)
+router.post('/profile', verifyToken, async (req, res) => {
+  const {
+    name,
+    email,
+    phone,
+    address,
+    companyName,
+    website,
+    businessLicense,
+    description
+  } = req.body;
+
+  // Build update query dynamically
+  const updates = [];
+  const values = [];
+  let paramCount = 1;
+
+  if (name) { updates.push(`name = $${paramCount++}`); values.push(name); }
+  if (email) { updates.push(`email = $${paramCount++}`); values.push(email); }
+  if (phone) { updates.push(`phone = $${paramCount++}`); values.push(phone); }
+  if (address) { updates.push(`address = $${paramCount++}`); values.push(address); }
+  if (companyName) { updates.push(`company_name = $${paramCount++}`); values.push(companyName); }
+  if (website) { updates.push(`website = $${paramCount++}`); values.push(website); }
+  if (businessLicense) { updates.push(`business_license = $${paramCount++}`); values.push(businessLicense); }
+  if (description) { updates.push(`description = $${paramCount++}`); values.push(description); }
+
+  if (updates.length === 0) {
+    return res.status(400).json({
+      success: false,
+      error: 'At least one field is required',
+      code: 'VALIDATION_ERROR',
+    });
+  }
+
+  values.push(req.user.id);
+
+  const query = `
+    UPDATE public.users
+    SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $${paramCount}
+    RETURNING id, name, email, phone, address, company_name, website, business_license, description
+  `;
+
+  try {
+    const { rows } = await pool.query(query, values);
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+        code: 'NOT_FOUND',
+      });
+    }
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: rows[0],
     });
   } catch (err) {
     console.error('Error updating profile:', err);

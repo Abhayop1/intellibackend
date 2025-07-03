@@ -8,6 +8,7 @@ const router = express.Router();
 // Get service provider company information
 router.get('/company-info', verifyToken, restrictTo('service_provider'), async (req, res) => {
   try {
+    console.log('Decoded user:', req.user);
     const { rows } = await pool.query(
       `
       SELECT 
@@ -16,8 +17,9 @@ router.get('/company-info', verifyToken, restrictTo('service_provider'), async (
       FROM public.service_providers
       WHERE user_id = $1
       `,
-      [req.user.user_id]
+      [req.user.id]
     );
+    console.log('Provider rows:', rows);
 
     if (!rows.length) {
       return res.status(404).json({
@@ -56,7 +58,7 @@ router.get('/stats', verifyToken, restrictTo('service_provider'), async (req, re
       `
       SELECT id FROM public.service_providers WHERE user_id = $1
       `,
-      [req.user.user_id]
+      [req.user.id]
     );
 
     if (!providerRows.length) {
@@ -96,7 +98,9 @@ router.get('/stats', verifyToken, restrictTo('service_provider'), async (req, re
       },
       {
         label: 'Total Revenue',
-        value: serviceRows[0].total_revenue ? serviceRows[0].total_revenue.toFixed(2) : '0.00',
+        value: serviceRows[0].total_revenue !== null && serviceRows[0].total_revenue !== undefined
+          ? Number(serviceRows[0].total_revenue).toFixed(2)
+          : '0.00',
         change: '+0', // Placeholder
         trend: 'stable',
       },
@@ -123,7 +127,7 @@ router.get('/recent-services', verifyToken, restrictTo('service_provider'), asyn
       `
       SELECT id FROM public.service_providers WHERE user_id = $1
       `,
-      [req.user.user_id]
+      [req.user.id]
     );
 
     if (!providerRows.length) {
@@ -195,6 +199,76 @@ router.get('/service-types', verifyToken, restrictTo('service_provider'), async 
       error: 'Failed to fetch service types',
       code: 'INTERNAL_ERROR',
     });
+  }
+});
+
+// Update service provider company information
+router.put('/company-info', verifyToken, restrictTo('service_provider'), async (req, res) => {
+  try {
+    console.log('Decoded user:', req.user);
+    // Accept all possible fields from the frontend, with defaults
+    const {
+      companyName = '',
+      website = '',
+      businessLicense = '',
+      serviceTypes = [],
+      description = '',
+      logoUrl = ''
+    } = req.body;
+
+    // Update the service_providers table, cast service_types to JSON
+    const { rowCount } = await pool.query(
+      `UPDATE public.service_providers
+       SET company_name = $1,
+           website = $2,
+           business_license = $3,
+           service_types = $4::json,
+           description = $5,
+           logo_url = $6,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE user_id = $7`,
+      [companyName, website, businessLicense, JSON.stringify(serviceTypes), description, logoUrl, req.user.id]
+    );
+    console.log('Update rowCount:', rowCount);
+
+    if (rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Service provider not found',
+        code: 'NOT_FOUND',
+      });
+    }
+
+    res.json({ success: true, message: 'Company info updated successfully' });
+  } catch (err) {
+    console.error('Error updating company info:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update company info',
+      code: 'INTERNAL_ERROR',
+    });
+  }
+});
+
+// Get all services for the logged-in provider
+router.get('/all-services', verifyToken, restrictTo('service_provider'), async (req, res) => {
+  try {
+    const { rows: providerRows } = await pool.query(
+      'SELECT id FROM public.service_providers WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (!providerRows.length) {
+      return res.status(404).json({ success: false, error: 'Provider not found' });
+    }
+    const providerId = providerRows[0].id;
+    const { rows } = await pool.query(
+      'SELECT * FROM public.services WHERE provider_id = $1 ORDER BY created_at DESC',
+      [providerId]
+    );
+    res.json({ success: true, services: rows });
+  } catch (err) {
+    console.error('Error fetching all services:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch services' });
   }
 });
 

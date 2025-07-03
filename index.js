@@ -7,6 +7,8 @@ const serviceRoutes = require('./service_api');
 const userRoutes = require('./user_api');
 const providerRoutes = require('./provider_api');
 const adminRoutes = require('./admin_api');
+const glossaryRoutes = require('./glossary_api');
+const savedConfigurationsRoutes = require('./saved_configurations_api');
 
 const app = express();
 
@@ -15,7 +17,7 @@ app.use(express.json());
 
 // CORS Configuration
 app.use(cors({
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173', 'http://localhost:3000'],
+  origin: 'http://localhost:5173',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -24,12 +26,12 @@ app.use(cors({
 // Rate Limiting
 const loginLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 5,
+  max: 10,
   message: { success: false, error: 'Too many login attempts, try again later', code: 'RATE_LIMIT_EXCEEDED' },
 });
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 100,
+  max: 150,
   message: { success: false, error: 'Too many requests, try again later', code: 'RATE_LIMIT_EXCEEDED' },
 });
 
@@ -47,6 +49,8 @@ app.use('/api/services', serviceRoutes); // For service management and document 
 app.use('/api/provider', providerRoutes); // For provider-specific endpoints
 app.use('/api/user', userRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/glossary', glossaryRoutes); // For glossary and UoM costs
+app.use('/api/saved-configurations', savedConfigurationsRoutes);
 
 // Global Error Handler
 app.use((error, req, res, next) => {

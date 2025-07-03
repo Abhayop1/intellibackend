@@ -43,19 +43,14 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// Get specific service details
+// Get specific service details (for general users)
 router.get('/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
 
   try {
     const { rows } = await pool.query(
       `
-      SELECT 
-        s.id, s.name, sp.company_name AS provider, 
-        s.description, s.service_type, s.configuration, s.status
-      FROM public.services s
-      JOIN public.service_providers sp ON s.provider_id = sp.id
-      WHERE s.id = $1
+      SELECT * FROM public.services WHERE id = $1
       `,
       [id]
     );
@@ -68,15 +63,22 @@ router.get('/:id', verifyToken, async (req, res) => {
       });
     }
 
+    // Parse tree and documents if present
+    let tree = rows[0].tree;
+    let documents = rows[0].documents;
+    try {
+      if (typeof tree === 'string') tree = JSON.parse(tree);
+    } catch {}
+    try {
+      if (typeof documents === 'string') documents = JSON.parse(documents);
+    } catch {}
     res.json({
       success: true,
       service: {
-        id: rows[0].id,
-        name: row.name,
-        provider: rows[0].company_name,
-        description: rows[0].description,
-        configuration: rows[0].configuration || {},
-        status: rows[0].status,
+        ...rows[0],
+        tree,
+        documents,
+        svg: rows[0].svg || null,
       },
     });
   } catch (err) {
@@ -164,7 +166,7 @@ router.post('/', verifyToken, restrictTo('service_provider'), async (req, res) =
     const providerQuery = `
       SELECT id FROM public.service_providers WHERE user_id = $1
     `;
-    const providerResult = await client.query(providerQuery, [req.user.user_id]);
+    const providerResult = await client.query(providerQuery, [req.user.id]);
 
     if (!providerResult.rows.length) {
       await client.query('ROLLBACK');
@@ -267,7 +269,7 @@ router.post('/:id/upload-document', verifyToken, upload.single('document'), asyn
       file.size,
       type,
       description || '',
-      req.user.user_id,
+      req.user.id,
     ];
     const documentResult = await client.query(documentQuery, documentValues);
 
@@ -289,5 +291,199 @@ router.post('/:id/upload-document', verifyToken, upload.single('document'), asyn
     client.release();
   }
 });
+
+// Save a new service with tree structure
+router.post('/save-service', verifyToken, restrictTo('service_provider'), async (req, res) => {
+  try {
+    const { name, description, tree, documents, svg } = req.body;
+    const providerIdResult = await pool.query(
+      'SELECT id FROM public.service_providers WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (!providerIdResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'Provider not found' });
+    }
+    const providerId = providerIdResult.rows[0].id;
+
+    // Save the service (tree as JSON)
+    const result = await pool.query(
+      `INSERT INTO public.services (provider_id, name, description, tree, documents, svg, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING id`,
+      [providerId, name, description, JSON.stringify(tree), JSON.stringify(documents), svg]
+    );
+
+    res.json({ success: true, serviceId: result.rows[0].id });
+  } catch (err) {
+    console.error('Error saving service:', err);
+    res.status(500).json({ success: false, message: 'Failed to save service' });
+  }
+});
+
+// Get a single service by ID for editing/viewing (for service providers)
+router.get('/:id', verifyToken, restrictTo('service_provider'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query(
+      'SELECT * FROM public.services WHERE id = $1',
+      [id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: 'Service not found' });
+    }
+    // Parse tree and documents if present
+    let tree = rows[0].tree;
+    let documents = rows[0].documents;
+    try {
+      if (typeof tree === 'string') tree = JSON.parse(tree);
+    } catch {}
+    try {
+      if (typeof documents === 'string') documents = JSON.parse(documents);
+    } catch {}
+    res.json({
+      success: true,
+      service: {
+        ...rows[0],
+        tree,
+        documents,
+        svg: rows[0].svg || null,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching service:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch service' });
+  }
+});
+
+// Update an existing service by ID
+router.put('/:id', verifyToken, restrictTo('service_provider'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, tree, documents, svg } = req.body;
+
+    // Update the service
+    const result = await pool.query(
+      `UPDATE public.services
+       SET name = $1, description = $2, tree = $3, documents = $4, svg = $5, updated_at = NOW()
+       WHERE id = $6
+       RETURNING *`,
+      [name, description, JSON.stringify(tree), JSON.stringify(documents), svg, id]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, error: 'Service not found' });
+    }
+
+    res.json({ success: true, service: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating service:', err);
+    res.status(500).json({ success: false, error: 'Failed to update service' });
+  }
+});
+
+// Delete a service by ID
+router.delete('/:id', verifyToken, restrictTo('service_provider'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM public.services WHERE id = $1 RETURNING *', [id]);
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, error: 'Service not found' });
+    }
+    res.json({ success: true, message: 'Service deleted' });
+  } catch (err) {
+    console.error('Error deleting service:', err);
+    res.status(500).json({ success: false, error: 'Failed to delete service' });
+  }
+});
+
+// Get service tree structure
+router.get('/:id/tree', verifyToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT tree FROM public.services WHERE id = $1',
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        error: 'Service not found',
+        code: 'NOT_FOUND',
+      });
+    }
+
+    let tree = rows[0].tree;
+    try {
+      if (typeof tree === 'string') tree = JSON.parse(tree);
+    } catch (e) {
+      tree = {};
+    }
+
+    res.json({
+      success: true,
+      tree: tree || {},
+    });
+  } catch (err) {
+    console.error('Error fetching service tree:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch service tree',
+      code: 'INTERNAL_ERROR',
+    });
+  }
+});
+
+// Get service glossary/metadata
+router.get('/:id/glossary', verifyToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const { rows } = await pool.query(
+      'SELECT name, description, service_type FROM public.services WHERE id = $1',
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        error: 'Service not found',
+        code: 'NOT_FOUND',
+      });
+    }
+
+    // Create a basic glossary based on service information
+    const service = rows[0];
+    const glossary = {
+      [service.name]: service.description || 'Service description',
+      'service_type': service.service_type || 'general',
+      'units': {
+        'Mbps': 'Megabits per second - Internet speed measurement',
+        'GB': 'Gigabytes - Data usage measurement',
+        'month': 'Monthly billing period',
+        'year': 'Yearly billing period',
+        'installation': 'One-time installation service',
+        'setup': 'Initial setup and configuration',
+        'support': 'Technical support service',
+        'maintenance': 'Ongoing maintenance service'
+      }
+    };
+
+    res.json({
+      success: true,
+      glossary: glossary,
+    });
+  } catch (err) {
+    console.error('Error fetching service glossary:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch service glossary',
+      code: 'INTERNAL_ERROR',
+    });
+  }
+});
+
+
 
 module.exports = router;
