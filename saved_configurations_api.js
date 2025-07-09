@@ -47,7 +47,13 @@ router.get('/', requireAuth, async (req, res) => {
         serviceName: row.service_name || row.name,
         serviceDescription: row.service_description || `Configuration with ${configObj.selectedNodes?.length || 0} selected nodes`,
         provider: row.provider_name || 'ServiceFlow',
-        userChoices: configObj.selectedNodes || [],
+        userChoices: (configObj.selectedNodes || []).map((node) => ({
+          nodeId: node.node?.id || node.nodeId,
+          quantity: node.quantity,
+          requirements: node.requirements,
+          attributes: node.attributes, // <-- include attributes
+          customInputs: node.customInputs || {}
+        })),
         selectedPath: configObj.selectedPath || [],
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -254,11 +260,11 @@ router.get('/:id', requireAuth, async (req, res) => {
       serviceDescription: row.service_description || `Configuration with ${row.configuration?.selectedNodes?.length || 0} selected nodes`,
       provider: row.provider_name || 'ServiceFlow',
       userChoices: row.configuration?.selectedNodes?.map((node) => ({
-        nodeId: node.node.id,
-        selectedAttributes: {
-          quantity: { quantity: node.quantity, unit: 'units', price: 0 }
-        },
-        customInputs: {}
+        nodeId: node.node?.id || node.nodeId,
+        quantity: node.quantity,
+        requirements: node.requirements,
+        attributes: node.attributes, // <-- include attributes
+        customInputs: node.customInputs || {}
       })) || [],
       selectedPath: row.configuration?.selectedPath || [],
       createdAt: row.created_at,
